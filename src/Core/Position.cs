@@ -1,31 +1,64 @@
+using Core.Shared;
+
 namespace Core;
 
 public class Position
 {
-    public Guid Id { get; private set; }
-
-    public string Name { get; private set; } = string.Empty;
-
-    public string Description { get; private set; } = string.Empty;
-
-    public bool IsActive { get; private set; } = true;
-
-    public DateTime CreatedAt { get; private set; } = DateTime.UtcNow;
-
-    public DateTime UpdatedAt { get; private set; } = DateTime.UtcNow;
-
+    public PositionId Id { get; private set; }
+    public DOnotEmptyString Name { get; private set; }
+    public DOnotEmptyString Description { get; private set; }
+    public bool IsActive { get; private set; }
+    public EntityTime LifeTime { get; private set; }
+    
     private Position(
-        string name,
-        string description,
-        DateTime createdAt,
-        DateTime updatedAt)
+        PositionId id,
+        DOnotEmptyString name,
+        DOnotEmptyString description,
+        EntityTime lifetime)
     {
+        Id = id;
         Name = name;
         Description = description;
-        CreatedAt = createdAt;
-        UpdatedAt = updatedAt;
+        IsActive = true;
+        LifeTime = lifetime;
     }
+    
+    public static Position Create(DOnotEmptyString name, DOnotEmptyString description)
+    {
+        return new Position(
+            PositionId.New(),
+            name,
+            description,
+            new EntityTime());
+    }
+
+        public void Update(DOnotEmptyString name, DOnotEmptyString description)
+        {
+            Name = name;
+            Description = description;
+            LifeTime.Touch();
+        }
+
+        public void Deactivate()
+        {
+            if (!IsActive) return;
+            IsActive = false;
+            LifeTime.Touch();
+        }
+
+        public void Activate()
+        {
+            if (IsActive) return;
+            IsActive = true;
+            LifeTime.Touch();
+        }
+
+        public void Delete()
+        {
+            LifeTime.SoftDelete();
+        }
 }
+
 
 
 
