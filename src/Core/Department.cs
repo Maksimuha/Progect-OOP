@@ -3,7 +3,7 @@ using Core.Shared;
 
 namespace Core;
 
-public class Department
+public sealed class Department
 {
     public DepartmentId Id { get; private set; }
     public DOnotEmptyString Name { get; private set; }
@@ -11,6 +11,10 @@ public class Department
     public DepartmentId? ParentId { get; private set; }
     public TreePath Path { get; private set; }
     public EntityTime LifeTime { get; private set; }
+
+    // Depth всегда берем из Path, чтобы не было рассинхрона
+    public short Depth => Path.Depth;
+
     private Department(
         DepartmentId id,
         DOnotEmptyString name,
@@ -40,6 +44,7 @@ public class Department
             lifeTime: new EntityTime());
     }
 
+    // Дочернее подразделение
     public static Department CreateChild(
         DOnotEmptyString name,
         DOnotEmptyString identifier,
@@ -48,7 +53,7 @@ public class Department
         if (parent is null)
             throw new ArgumentException("Родитель не может быть null.");
         if (parent.LifeTime.IsDeleted)
-            throw new ArgumentException("Нельзя добавить ребенка в удаленное подразделение.");
+            throw new InvalidOperationException("Нельзя добавить ребенка в архивированное подразделение.");
 
         var id = DepartmentId.New();
         return new Department(
@@ -60,14 +65,66 @@ public class Department
             lifeTime: new EntityTime());
     }
 
-    public void Rename(DOnotEmptyString newName)
+    // Для восстановления из БД
+    internal static Department Restore(
+        DepartmentId id,
+        DOnotEmptyString name,
+        DOnotEmptyString identifier,
+        DepartmentId? parentId,
+        TreePath path,
+        EntityTime lifeTime)
+        => new(id, name, identifier, parentId, path, lifeTime);
+
+    // Обновление полей (имя и/или идентификатор)
+    public void Update(
+        DOnotEmptyString? name = null,
+        DOnotEmptyString? identifier = null)
     {
-        Name = newName;
+        EnsureNotArchived();
+
+        bool changed = false;
+        if (name is not null)       { Name = name;             changed = true; }
+        if (identifier is not null) { Identifier = identifier; changed = true; }
+
+        if (changed) LifeTime.Touch();
+    }
+
+    // Присоединение к новому родителю
+    public void SetParent(Department newParent)
+    {
+        EnsureNotArchived();
+
+        if (newParent is null)
+            throw new ArgumentException("Родитель не может быть null.");
+            
+        if (newParent.Id == Id)
+            throw new InvalidOperationException("Нельзя присоединить подразделение к самому себе.");
+            
+        if (ParentId == newParent.Id)
+            throw new InvalidOperationException("Этот родитель уже назначен.");
+            
+        if (newParent.LifeTime.IsDeleted)
+            throw new InvalidOperationException("Нельзя присоединиться к архивированному подразделению.");
+            
+        // Проверка на цикл (нельзя присоединить родителя к своему же потомку)
+        if (newParent.Path.IsDescendantOf(Path))
+            throw new InvalidOperationException("Нельзя присоединить подразделение к своему потомку (цикл).");
+
+        ParentId = newParent.Id;
+        Path = newParent.Path.AppendedChild(Id.Value);
         LifeTime.Touch();
     }
 
-    public void Delete()
+    public void Archive()
     {
+        if (LifeTime.IsDeleted) return;
         LifeTime.SoftDelete();
     }
+
+    private void EnsureNotArchived()
+    {
+        if (LifeTime.IsDeleted)
+            throw new InvalidOperationException($"Подразделение {Id} архивировано. Редактирование запрещено.");
+    }
 }
+

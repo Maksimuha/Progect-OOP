@@ -1,6 +1,8 @@
 using System.Text.RegularExpressions;
 namespace Core.Shared;
 
+
+//* TimeZonee (двойная e) — чтобы не конфликтовать с System.TimeZone
 public record TimeZonee
 {
     public DOnotEmptyString Value { get; }
