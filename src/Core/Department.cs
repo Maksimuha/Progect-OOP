@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using Core.Entities;
 using Core.Shared;
 
 namespace Core;
@@ -11,9 +11,8 @@ public sealed class Department
     public DepartmentId? ParentId { get; private set; }
     public TreePath Path { get; private set; }
     public EntityTime LifeTime { get; private set; }
-
-    // Depth всегда берем из Path, чтобы не было рассинхрона
-    public short Depth => Path.Depth;
+    private readonly List<DepartmentLocation> _locations = new();
+    private readonly List<DepartmentPosition> _positions = new();
 
     private Department(
         DepartmentId id,
@@ -35,12 +34,13 @@ public sealed class Department
     public static Department CreateRoot(DOnotEmptyString name, DOnotEmptyString identifier)
     {
         var id = DepartmentId.New();
-        return new Department(
+        var treePath = TreePath.CreateRoot(identifier);
+        return Create(
             id,
             name,
             identifier,
             parentId: null,
-            path: TreePath.CreateRoot(id.Value),
+            path: treePath,
             lifeTime: new EntityTime());
     }
 
@@ -56,24 +56,90 @@ public sealed class Department
             throw new InvalidOperationException("Нельзя добавить ребенка в архивированное подразделение.");
 
         var id = DepartmentId.New();
-        return new Department(
+        var treePath = parent.Path.AppendedChild(identifier);
+        return Create(
             id,
             name,
             identifier,
             parentId: parent.Id,
-            path: parent.Path.AppendedChild(id.Value),
+            path: treePath,
             lifeTime: new EntityTime());
     }
 
-    // Для восстановления из БД
-    internal static Department Restore(
+    public static Department Create(
         DepartmentId id,
         DOnotEmptyString name,
         DOnotEmptyString identifier,
         DepartmentId? parentId,
         TreePath path,
         EntityTime lifeTime)
-        => new(id, name, identifier, parentId, path, lifeTime);
+    {
+        if (id.Value == Guid.Empty)
+            throw new ArgumentException("ID подразделения не может быть пустым.", nameof(id));
+
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(identifier);
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(lifeTime);
+
+        return new Department(id, name, identifier, parentId, path, lifeTime);
+    }
+
+    public DepartmentLocation AttachLocation(Location location)
+    {
+        EnsureNotArchived();
+        ArgumentNullException.ThrowIfNull(location);
+
+        if (location.LifeTime.IsDeleted)
+            throw new InvalidOperationException("Нельзя прикрепить архивированную локацию.");
+        var locationexist = _locations.Any(l =>
+        { 
+            var idExuals = l.LocationId == location.Id;
+            if (idExuals)
+                return true;
+
+            var addressEquals = l.LocationName.Value == location.Address.Value;
+            if (addressEquals)
+                return true;
+
+            return false;
+
+        });
+        if (locationexist)
+            throw new InvalidOperationException($"В подразделении уже есть локация с идентификатором '{location.Id}' или по адресу '{location.Address.Value}'.");
+        
+        var createdLocation = DepartmentLocation.Create(Id, location.Id, location.Address);
+        _locations.Add(createdLocation);
+        return createdLocation;
+    }
+
+    public DepartmentPosition AttachPosition(Position position, bool alreadyAttached, bool nameAlreadyUsed)
+    {
+        EnsureNotArchived();
+        ArgumentNullException.ThrowIfNull(position);
+
+        if (position.LifeTime.IsDeleted)
+            throw new InvalidOperationException("Нельзя прикрепить архивированную должность.");
+        var positionexist = _positions.Any(p =>
+        { 
+            var idExuals = p.PositionId == position.Id;
+            if (idExuals)
+                return true;
+
+            var nameEquals = p.PositionName.Value == position.Name.Value;
+            if (nameEquals)
+                return true;
+
+            return false;
+
+        });
+        if (positionexist)
+            throw new InvalidOperationException($"В подразделении уже есть должность с идентификатором '{position.Id}' или названием '{position.Name.Value}'.");
+        
+        var createdPosition = DepartmentPosition.Create(Id, position.Id, position.Name);
+        _positions.Add(createdPosition);
+        return createdPosition;
+    }
 
     // Обновление полей (имя и/или идентификатор)
     public void Update(
@@ -83,36 +149,10 @@ public sealed class Department
         EnsureNotArchived();
 
         bool changed = false;
-        if (name is not null)       { Name = name;             changed = true; }
+        if (name is not null) { Name = name; changed = true; }
         if (identifier is not null) { Identifier = identifier; changed = true; }
 
         if (changed) LifeTime.Touch();
-    }
-
-    // Присоединение к новому родителю
-    public void SetParent(Department newParent)
-    {
-        EnsureNotArchived();
-
-        if (newParent is null)
-            throw new ArgumentException("Родитель не может быть null.");
-            
-        if (newParent.Id == Id)
-            throw new InvalidOperationException("Нельзя присоединить подразделение к самому себе.");
-            
-        if (ParentId == newParent.Id)
-            throw new InvalidOperationException("Этот родитель уже назначен.");
-            
-        if (newParent.LifeTime.IsDeleted)
-            throw new InvalidOperationException("Нельзя присоединиться к архивированному подразделению.");
-            
-        // Проверка на цикл (нельзя присоединить родителя к своему же потомку)
-        if (newParent.Path.IsDescendantOf(Path))
-            throw new InvalidOperationException("Нельзя присоединить подразделение к своему потомку (цикл).");
-
-        ParentId = newParent.Id;
-        Path = newParent.Path.AppendedChild(Id.Value);
-        LifeTime.Touch();
     }
 
     public void Archive()
@@ -127,4 +167,3 @@ public sealed class Department
             throw new InvalidOperationException($"Подразделение {Id} архивировано. Редактирование запрещено.");
     }
 }
-
