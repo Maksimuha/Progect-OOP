@@ -31,21 +31,15 @@ public record TreePath
     }
 
     // Создание корневого пути
-    public static TreePath CreateRoot(Guid departmentId)
+    public static TreePath CreateRoot(DOnotEmptyString departmentId)
     {
-        if (departmentId == Guid.Empty)
-            throw new ArgumentException("Id корня не может быть пустым.");
-
-        return new TreePath(departmentId.ToString(), 1);
+        return new TreePath(departmentId.Value, 1);
     }
 
     // Формирование дочернего пути
-    public TreePath AppendedChild(Guid childId)
+    public TreePath AppendedChild(DOnotEmptyString childId)
     {
-        if (childId == Guid.Empty)
-            throw new ArgumentException("Id потомка не может быть пустым.");
-
-        return new TreePath($"{Path}{Separator}{childId}", (short)(Depth + 1));
+        return new TreePath($"{Path}{Separator}{childId.Value}", (short)(Depth + 1));
     }
 
     // Проверка, что текущий путь — потомок другого
